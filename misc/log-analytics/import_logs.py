@@ -317,6 +317,10 @@ class Configuration(object):
             "known Website's URL. New websites will not be automatically created. "
             "                         Used only if --add-sites-new-hosts or --idsite are not set",
         )
+        option_parser.add_option(
+            '--map-idsite', dest='map_siteid',
+            help="The siteid came from the log itself in <idsite> field."
+        )
         default_config = os.path.abspath(
             os.path.join(os.path.dirname(__file__),
             '../../config/config.ini.php'),
@@ -577,6 +581,9 @@ class Configuration(object):
         if self.options.site_id:
             logging.debug('Resolver: static')
             return StaticResolver(self.options.site_id)
+        elif self.options.map_siteid:
+            logging.debug('Resolver: map')
+            return MapResolver()
         else:
             logging.debug('Resolver: dynamic')
             return DynamicResolver()
@@ -1066,6 +1073,39 @@ class DynamicResolver(object):
             )
 
 
+class MapResolver(object):
+    """
+    return the site_id from the log
+    """
+
+    def __init__(self, ):
+        self._cache = {}
+
+    def _add_site(self, idsite, host):
+        if self._cache.has_key(idsite):
+            return True
+        self._cache[idsite] = host
+        stats.piwik_sites.add(idsite)
+
+    def resolve(self, hit):
+        idsite = None
+        host = None
+        if hit.idsite is None:
+            if config.options.site_id_fallback is not None:
+                logging.debug('Using default site for hostname: %s', hit.host)
+                idsite = config.options.site_id_fallback
+                host = hit.host
+        else:
+            idsite = hit.idsite
+            host = hit.host
+
+        self._add_site(idsite, host)
+        return (idsite, host)
+
+    def check_format(self, format):
+        pass
+
+
 
 
 class Recorder(object):
@@ -1490,6 +1530,11 @@ class Parser(object):
                 hit.path = hit.full_path
             except (KeyError, IndexError):
                 hit.path, _, hit.query_string = hit.full_path.partition(config.options.query_string_delimiter)
+
+            try:
+                hit.idsite = match.group('idsite')
+            except (KeyError, IndexError):
+                hit.idsite = None
 
             try:
                 hit.referrer = match.group('referrer')
