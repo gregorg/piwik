@@ -1083,9 +1083,24 @@ class MapResolver(object):
 
     def _add_site(self, idsite, host):
         if self._cache.has_key(idsite):
-            return True
-        self._cache[idsite] = host
-        stats.piwik_sites.add(idsite)
+            return self._cache[idsite]
+
+        sites = piwik.call_api(
+            'SitesManager.getSiteFromId', idSite=idsite
+        )
+        try:
+            site = sites[0]
+            if site.get('result') == 'error':
+               logging.warning("cannot get the main URL of this site: invalid site ID: %s" % idsite)
+               return None
+            self._cache[idsite] = site['main_url']
+            stats.piwik_sites.add(idsite)
+            return self._cache[idsite]
+        except (IndexError, KeyError):
+           logging.debug('response for SitesManager.getSiteFromId: %s', str(sites))
+           logging.warning("cannot get the main URL of this site: invalid site ID: %s" % idsite)
+           return None
+
 
     def resolve(self, hit):
         idsite = None
@@ -1094,12 +1109,12 @@ class MapResolver(object):
             if config.options.site_id_fallback is not None:
                 logging.debug('Using default site for hostname: %s', hit.host)
                 idsite = config.options.site_id_fallback
-                host = hit.host
         else:
             idsite = hit.idsite
-            host = hit.host
 
-        self._add_site(idsite, host)
+        host = self._add_site(idsite, host)
+        if host is None:
+            idsite = None
         return (idsite, host)
 
     def check_format(self, format):
